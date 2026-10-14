@@ -1,0 +1,755 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Gyro Maze Controller</title>
+
+    <style>
+
+        * {
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+
+            margin: 0;
+
+            width: 100%;
+            min-height: 100%;
+
+            background: #101318;
+            color: white;
+
+            font-family:
+                -apple-system,
+                BlinkMacSystemFont,
+                "Segoe UI",
+                sans-serif;
+        }
+
+        body {
+
+            display: flex;
+
+            justify-content: center;
+            align-items: center;
+
+            padding: 20px;
+        }
+
+        .controller {
+
+            width: min(
+                100%,
+                520px
+            );
+        }
+
+        h1 {
+
+            text-align: center;
+        }
+
+        .status {
+
+            padding: 14px;
+
+            margin-bottom: 12px;
+
+            background: #1c222b;
+
+            border-radius: 12px;
+
+            text-align: center;
+        }
+
+        .values {
+
+            display: grid;
+
+            gap: 10px;
+        }
+
+        .value {
+
+            display: flex;
+
+            justify-content: space-between;
+
+            padding: 14px;
+
+            background: #1c222b;
+
+            border-radius: 12px;
+        }
+
+        .number {
+
+            font-family: monospace;
+        }
+
+        button {
+
+            width: 100%;
+
+            margin-top: 14px;
+
+            padding: 16px;
+
+            border: 0;
+
+            border-radius: 12px;
+
+            font-size: 17px;
+
+            font-weight: bold;
+        }
+
+        #startButton {
+
+            background: white;
+            color: black;
+        }
+
+        #calibrateButton {
+
+            background: #343d49;
+            color: white;
+        }
+
+    </style>
+
+</head>
+
+<body>
+
+<div class="controller">
+
+    <h1>
+        Gyro Maze Controller
+    </h1>
+
+
+    <div
+        id="connectionStatus"
+        class="status"
+    >
+        Unity接続待機中...
+    </div>
+
+
+    <div
+        id="sensorStatus"
+        class="status"
+    >
+        センサー未開始
+    </div>
+
+
+    <div class="values">
+
+        <div class="value">
+
+            <span>
+                Alpha
+            </span>
+
+            <span
+                id="alpha"
+                class="number"
+            >
+                0.0°
+            </span>
+
+        </div>
+
+
+        <div class="value">
+
+            <span>
+                Beta
+            </span>
+
+            <span
+                id="beta"
+                class="number"
+            >
+                0.0°
+            </span>
+
+        </div>
+
+
+        <div class="value">
+
+            <span>
+                Gamma
+            </span>
+
+            <span
+                id="gamma"
+                class="number"
+            >
+                0.0°
+            </span>
+
+        </div>
+
+    </div>
+
+
+    <button id="startButton">
+        センサー開始
+    </button>
+
+
+    <button id="calibrateButton">
+        この向きを基準にする
+    </button>
+
+</div>
+
+
+<script>
+
+const connectionStatus =
+    document.getElementById(
+        "connectionStatus"
+    );
+
+const sensorStatus =
+    document.getElementById(
+        "sensorStatus"
+    );
+
+const alphaElement =
+    document.getElementById(
+        "alpha"
+    );
+
+const betaElement =
+    document.getElementById(
+        "beta"
+    );
+
+const gammaElement =
+    document.getElementById(
+        "gamma"
+    );
+
+const startButton =
+    document.getElementById(
+        "startButton"
+    );
+
+const calibrateButton =
+    document.getElementById(
+        "calibrateButton"
+    );
+
+
+// ========================================
+// WebSocket
+// ========================================
+
+const pageParameters =
+    new URLSearchParams(
+        window.location.search
+    );
+
+
+const roomName =
+    pageParameters.get("room")
+    || "demo";
+
+
+let socket = null;
+
+
+function connectWebSocket() {
+
+    const protocol =
+        window.location.protocol
+        === "https:"
+        ? "wss:"
+        : "ws:";
+
+
+    const url =
+        protocol
+        + "//"
+        + window.location.host
+        + "/ws"
+        + "?room="
+        + encodeURIComponent(roomName)
+        + "&role=phone";
+
+
+    connectionStatus.textContent =
+        "サーバー接続中...";
+
+
+    socket =
+        new WebSocket(url);
+
+
+    socket.addEventListener(
+        "open",
+        () => {
+
+            connectionStatus.textContent =
+                "接続済み / Room: "
+                + roomName;
+        }
+    );
+
+
+    socket.addEventListener(
+        "close",
+        () => {
+
+            connectionStatus.textContent =
+                "切断 / 再接続中...";
+
+
+            setTimeout(
+                connectWebSocket,
+                2000
+            );
+        }
+    );
+
+
+    socket.addEventListener(
+        "error",
+        () => {
+
+            connectionStatus.textContent =
+                "通信エラー";
+
+        }
+    );
+}
+
+
+// ========================================
+// Quaternion
+// ========================================
+
+function degreesToRadians(degrees) {
+
+    return (
+        degrees
+        * Math.PI
+        / 180
+    );
+}
+
+
+function normalizeQuaternion(q) {
+
+    const length =
+        Math.sqrt(
+            q.x * q.x
+            + q.y * q.y
+            + q.z * q.z
+            + q.w * q.w
+        );
+
+
+    if (length < 0.000001) {
+
+        return {
+            x: 0,
+            y: 0,
+            z: 0,
+            w: 1
+        };
+    }
+
+
+    return {
+
+        x: q.x / length,
+        y: q.y / length,
+        z: q.z / length,
+        w: q.w / length
+    };
+}
+
+
+function multiplyQuaternion(a, b) {
+
+    return {
+
+        x:
+            a.w * b.x
+            + a.x * b.w
+            + a.y * b.z
+            - a.z * b.y,
+
+        y:
+            a.w * b.y
+            - a.x * b.z
+            + a.y * b.w
+            + a.z * b.x,
+
+        z:
+            a.w * b.z
+            + a.x * b.y
+            - a.y * b.x
+            + a.z * b.w,
+
+        w:
+            a.w * b.w
+            - a.x * b.x
+            - a.y * b.y
+            - a.z * b.z
+    };
+}
+
+
+function inverseQuaternion(q) {
+
+    const lengthSquared =
+        q.x * q.x
+        + q.y * q.y
+        + q.z * q.z
+        + q.w * q.w;
+
+
+    return {
+
+        x: -q.x / lengthSquared,
+        y: -q.y / lengthSquared,
+        z: -q.z / lengthSquared,
+        w:  q.w / lengthSquared
+    };
+}
+
+
+// DeviceOrientation:
+//
+// Z(alpha)
+// → X'(beta)
+// → Y''(gamma)
+//
+// の順番で回転
+function deviceOrientationToQuaternion(
+    alpha,
+    beta,
+    gamma
+) {
+
+    const halfAlpha =
+        degreesToRadians(alpha)
+        * 0.5;
+
+    const halfBeta =
+        degreesToRadians(beta)
+        * 0.5;
+
+    const halfGamma =
+        degreesToRadians(gamma)
+        * 0.5;
+
+
+    const qAlpha = {
+
+        x: 0,
+        y: 0,
+
+        z: Math.sin(halfAlpha),
+        w: Math.cos(halfAlpha)
+    };
+
+
+    const qBeta = {
+
+        x: Math.sin(halfBeta),
+
+        y: 0,
+        z: 0,
+
+        w: Math.cos(halfBeta)
+    };
+
+
+    const qGamma = {
+
+        x: 0,
+
+        y: Math.sin(halfGamma),
+
+        z: 0,
+
+        w: Math.cos(halfGamma)
+    };
+
+
+    return normalizeQuaternion(
+
+        multiplyQuaternion(
+
+            multiplyQuaternion(
+                qAlpha,
+                qBeta
+            ),
+
+            qGamma
+        )
+    );
+}
+
+
+// ========================================
+// Sensor
+// ========================================
+
+let currentOrientation = null;
+
+let referenceOrientation = null;
+
+let sensorStarted = false;
+
+let lastSendTime = 0;
+
+let sequence = 0;
+
+
+function handleOrientation(event) {
+
+    if (
+        event.alpha === null
+        || event.beta === null
+        || event.gamma === null
+    ) {
+        return;
+    }
+
+
+    const alpha =
+        event.alpha;
+
+    const beta =
+        event.beta;
+
+    const gamma =
+        event.gamma;
+
+
+    alphaElement.textContent =
+        alpha.toFixed(1)
+        + "°";
+
+    betaElement.textContent =
+        beta.toFixed(1)
+        + "°";
+
+    gammaElement.textContent =
+        gamma.toFixed(1)
+        + "°";
+
+
+    currentOrientation =
+        deviceOrientationToQuaternion(
+            alpha,
+            beta,
+            gamma
+        );
+
+
+    // 最初の有効な姿勢を
+    // 自動的に基準にする
+    if (
+        referenceOrientation === null
+    ) {
+
+        referenceOrientation =
+            currentOrientation;
+
+        sensorStatus.textContent =
+            "センサー取得中";
+    }
+
+
+    const relativeOrientation =
+        normalizeQuaternion(
+
+            multiplyQuaternion(
+
+                inverseQuaternion(
+                    referenceOrientation
+                ),
+
+                currentOrientation
+            )
+        );
+
+
+    // 約30HzでUnityへ送る
+    const now =
+        performance.now();
+
+
+    if (
+        now - lastSendTime
+        < 33
+    ) {
+        return;
+    }
+
+
+    lastSendTime = now;
+
+
+    if (
+        socket !== null
+        && socket.readyState
+            === WebSocket.OPEN
+    ) {
+
+        socket.send(
+
+            JSON.stringify({
+
+                type:
+                    "orientation",
+
+                x:
+                    relativeOrientation.x,
+
+                y:
+                    relativeOrientation.y,
+
+                z:
+                    relativeOrientation.z,
+
+                w:
+                    relativeOrientation.w,
+
+                sequence:
+                    sequence++,
+
+                time:
+                    now
+            })
+        );
+    }
+}
+
+
+async function startSensors() {
+
+    if (sensorStarted) {
+        return;
+    }
+
+
+    sensorStatus.textContent =
+        "センサー許可を確認中...";
+
+
+    try {
+
+        if (
+            typeof DeviceOrientationEvent
+            === "undefined"
+        ) {
+
+            sensorStatus.textContent =
+                "姿勢センサー非対応";
+
+            return;
+        }
+
+
+        if (
+            typeof
+            DeviceOrientationEvent
+                .requestPermission
+            === "function"
+        ) {
+
+            const permission =
+                await
+                DeviceOrientationEvent
+                    .requestPermission();
+
+
+            if (
+                permission
+                !== "granted"
+            ) {
+
+                sensorStatus.textContent =
+                    "センサー許可が必要です";
+
+                return;
+            }
+        }
+
+
+        window.addEventListener(
+            "deviceorientation",
+            handleOrientation
+        );
+
+
+        sensorStarted = true;
+
+
+        sensorStatus.textContent =
+            "センサー待機中...";
+    }
+    catch (error) {
+
+        console.error(error);
+
+        sensorStatus.textContent =
+            "センサー開始失敗";
+    }
+}
+
+
+function calibrate() {
+
+    if (
+        currentOrientation
+        === null
+    ) {
+        return;
+    }
+
+
+    referenceOrientation =
+        currentOrientation;
+
+
+    sensorStatus.textContent =
+        "基準姿勢を更新しました";
+}
+
+
+startButton.addEventListener(
+    "click",
+    startSensors
+);
+
+
+calibrateButton.addEventListener(
+    "click",
+    calibrate
+);
+
+
+connectWebSocket();
+
+</script>
+
+</body>
+
+</html>
