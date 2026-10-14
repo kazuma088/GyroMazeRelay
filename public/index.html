@@ -272,6 +272,25 @@ let unityReady =
 let synchronizedWithUnity =
     false;
 
+let startupSyncWaiting =
+    false;
+
+let startupStableSince =
+    null;
+
+let previousStartupOrientation =
+    null;
+
+
+// この角度以下なら「ほぼ動いていない」と判定
+const STARTUP_STABLE_ANGLE =
+    1.0;
+
+
+// 何ミリ秒静止したら操作開始するか
+const STARTUP_STABLE_TIME =
+    300;
+
 let generation =
     0;
 
@@ -352,36 +371,41 @@ function connectWebSocket() {
             // --------------------------
 
             if (
-                message.type
-                === "unity-ready"
-            ) {
-
-                unityReady =
-                    true;
-
-
-                synchronizedWithUnity =
-                    false;
+    		message.type
+    		=== "unity-ready"
+		)
+		{
+    		unityReady =
+        		true;
 
 
-                connectionStatus.textContent =
-                    "Unity接続済み / 同期中...";
+    		synchronizedWithUnity =
+        		false;
 
 
-                // すでにセンサー値があるなら
-                // 「今この瞬間」を0にする
+	    // ============================
+	    // すぐ同期せず
+	    // スマホが静止するのを待つ
+	    // ============================
 
-                if (
-                    currentOrientation
-                    !== null
-                ) {
-
-                    synchronizeWithUnity();
-                }
+    		startupSyncWaiting =
+        		true;
 
 
-                return;
-            }
+    		startupStableSince =
+        		null;
+
+
+    		previousStartupOrientation =
+        		null;
+
+
+    		connectionStatus.textContent =
+        		"Unity接続済み / スマホを止めてください";
+
+
+    		return;
+		}
 
 
             // --------------------------
@@ -666,6 +690,38 @@ function rotateVector(q, v) {
     };
 }
 
+
+function quaternionAngleDegrees(
+    a,
+    b
+) {
+
+    let dot =
+        Math.abs(
+            dotQuaternion(
+                a,
+                b
+            )
+        );
+
+
+    dot =
+        Math.min(
+            1,
+            Math.max(
+                -1,
+                dot
+            )
+        );
+
+
+    return (
+        2
+        * Math.acos(dot)
+        * 180
+        / Math.PI
+    );
+}
 
 // ==================================================
 // DeviceOrientation -> Quaternion
@@ -1144,8 +1200,7 @@ function synchronizeWithUnity() {
 
 
     // ==================================
-    // 「今この瞬間」を
-    // 新しいスマホ基準にする
+    // この瞬間をスマホの0にする
     // ==================================
 
     setReferenceOrientationLocal(
@@ -1158,8 +1213,7 @@ function synchronizeWithUnity() {
 
 
     // ==================================
-    // Unityへ
-    // 同期開始点を送る
+    // Unityへ初期化命令
     // ==================================
 
     socket.send(
@@ -1307,6 +1361,105 @@ function handleOrientation(event) {
             beta,
             gamma
         );
+
+    // ========================================
+    // 起動時の自動SYNC
+    // ========================================
+
+    if (
+        startupSyncWaiting
+    )
+    {
+        const now =
+            performance.now();
+
+
+        // 最初の1サンプル
+        if (
+            previousStartupOrientation
+            === null
+        )
+        {
+            previousStartupOrientation =
+                currentOrientation;
+
+
+            startupStableSince =
+                now;
+
+
+            return;
+        }
+
+
+        const angle =
+            quaternionAngleDegrees(
+                previousStartupOrientation,
+                currentOrientation
+            );
+
+
+        previousStartupOrientation =
+            currentOrientation;
+
+
+        // ----------------------------------------
+        // 動いている
+        // ----------------------------------------
+
+        if (
+            angle
+            > STARTUP_STABLE_ANGLE
+        )
+        {
+            startupStableSince =
+                now;
+
+
+            connectionStatus.textContent =
+                "Unity接続済み / スマホを止めてください";
+
+
+            return;
+        }
+
+
+        // ----------------------------------------
+        // ほぼ静止している
+        // ----------------------------------------
+
+        const stableTime =
+            now
+            - startupStableSince;
+
+
+        connectionStatus.textContent =
+            "姿勢を同期中...";
+
+
+        // まだ300ms経っていない
+        if (
+            stableTime
+            < STARTUP_STABLE_TIME
+        )
+        {
+            return;
+        }
+
+
+        // ========================================
+        // 300ms静止できた
+        // ========================================
+
+        startupSyncWaiting =
+            false;
+
+
+        synchronizeWithUnity();
+
+
+        return;
+    }
 
 
     let controllerRotation =
@@ -1511,8 +1664,20 @@ function calibrate() {
 
         return;
     }
+    // 起動用の静止待ちは解除
+    startupSyncWaiting =
+        false;
 
 
+    startupStableSince =
+        null;
+
+
+    previousStartupOrientation =
+        null;
+
+
+    // 押した瞬間に実行
     synchronizeWithUnity();
 }
 
