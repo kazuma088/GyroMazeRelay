@@ -899,6 +899,8 @@ let lastSendTime = 0;
 
 let sequence = 0;
 
+let calibrationId = 0;
+
 
 function setReferenceOrientation(
     orientation
@@ -916,6 +918,14 @@ function setReferenceOrientation(
 
     previousSentQuaternion =
         null;
+
+
+    // キャリブレーション番号を更新
+    calibrationId++;
+
+
+    // 次の姿勢データを待たずに送れるようにする
+    lastSendTime = 0;
 
 
     // 持ち方の簡単な表示
@@ -1192,6 +1202,9 @@ function handleOrientation(event) {
 
                 sequence:
                     sequence++,
+
+                calibrationId:
+                    calibrationId,
 
                 time:
                     now
