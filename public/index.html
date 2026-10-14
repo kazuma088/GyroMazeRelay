@@ -266,13 +266,24 @@ const roomName =
 
 let socket = null;
 
+let unityReady =
+    false;
+
+let synchronizedWithUnity =
+    false;
+
+let generation =
+    0;
+
 
 function connectWebSocket() {
 
     const protocol =
-        window.location.protocol === "https:"
+        window.location.protocol
+        === "https:"
         ? "wss:"
         : "ws:";
+
 
     const url =
         protocol
@@ -280,7 +291,9 @@ function connectWebSocket() {
         + window.location.host
         + "/ws"
         + "?room="
-        + encodeURIComponent(roomName)
+        + encodeURIComponent(
+            roomName
+        )
         + "&role=phone";
 
 
@@ -296,9 +309,104 @@ function connectWebSocket() {
         "open",
         () => {
 
+            unityReady =
+                false;
+
+
+            synchronizedWithUnity =
+                false;
+
+
             connectionStatus.textContent =
-                "接続済み / Room: "
-                + roomName;
+                "サーバー接続済み / Unity待機中...";
+        }
+    );
+
+
+    // ==================================
+    // サーバー → スマホ
+    // ==================================
+
+    socket.addEventListener(
+        "message",
+        (event) => {
+
+            let message;
+
+
+            try {
+
+                message =
+                    JSON.parse(
+                        event.data
+                    );
+            }
+            catch {
+
+                return;
+            }
+
+
+            // --------------------------
+            // Unity準備完了
+            // --------------------------
+
+            if (
+                message.type
+                === "unity-ready"
+            ) {
+
+                unityReady =
+                    true;
+
+
+                synchronizedWithUnity =
+                    false;
+
+
+                connectionStatus.textContent =
+                    "Unity接続済み / 同期中...";
+
+
+                // すでにセンサー値があるなら
+                // 「今この瞬間」を0にする
+
+                if (
+                    currentOrientation
+                    !== null
+                ) {
+
+                    synchronizeWithUnity();
+                }
+
+
+                return;
+            }
+
+
+            // --------------------------
+            // Unity切断
+            // --------------------------
+
+            if (
+                message.type
+                === "unity-disconnected"
+            ) {
+
+                unityReady =
+                    false;
+
+
+                synchronizedWithUnity =
+                    false;
+
+
+                connectionStatus.textContent =
+                    "Unity待機中...";
+
+
+                return;
+            }
         }
     );
 
@@ -307,8 +415,17 @@ function connectWebSocket() {
         "close",
         () => {
 
+            unityReady =
+                false;
+
+
+            synchronizedWithUnity =
+                false;
+
+
             connectionStatus.textContent =
                 "切断 / 再接続中...";
+
 
             setTimeout(
                 connectWebSocket,
@@ -900,7 +1017,7 @@ let lastSendTime = 0;
 let sequence = 0;
 
 
-function setReferenceOrientation(
+function setReferenceOrientationLocal(
     orientation
 ) {
 
@@ -985,24 +1102,96 @@ function setReferenceOrientation(
     sensorStatus.textContent =
         "基準設定済み / "
         + holdName;
+}
+
+
+function synchronizeWithUnity() {
+
+    if (
+        !unityReady
+    ) {
+        return;
+    }
 
 
     if (
-        socket !== null
-        &&
-        socket.readyState
-        === WebSocket.OPEN
+        currentOrientation
+        === null
     ) {
-
-        socket.send(
-
-            JSON.stringify({
-
-                type:
-                    "calibrate"
-            })
-        );
+        return;
     }
+
+
+    if (
+        socket === null
+        ||
+        socket.readyState
+        !== WebSocket.OPEN
+    ) {
+        return;
+    }
+
+
+    // ==================================
+    // 新しい同期世代
+    // ==================================
+
+    generation++;
+
+
+    synchronizedWithUnity =
+        false;
+
+
+    // ==================================
+    // 「今この瞬間」を
+    // 新しいスマホ基準にする
+    // ==================================
+
+    setReferenceOrientationLocal(
+        currentOrientation
+    );
+
+
+    previousSentQuaternion =
+        null;
+
+
+    // ==================================
+    // Unityへ
+    // 同期開始点を送る
+    // ==================================
+
+    socket.send(
+
+        JSON.stringify({
+
+            type:
+                "calibrate",
+
+            generation:
+                generation
+        })
+    );
+
+
+    // 次のセンサーイベントから
+    // orientation送信可能
+
+    synchronizedWithUnity =
+        true;
+
+
+    lastSendTime =
+        performance.now();
+
+
+    connectionStatus.textContent =
+        "接続済み / 操作可能";
+
+
+    sensorStatus.textContent =
+        "同期完了";
 }
 
 
@@ -1120,21 +1309,28 @@ function handleOrientation(event) {
         );
 
 
-    // 最初の姿勢を自動基準にする
-    if (
-        referenceOrientation === null
-    ) {
-
-        setReferenceOrientation(
-            currentOrientation
-        );
-    }
-
-
     let controllerRotation =
         getControllerRotation(
             currentOrientation
         );
+
+    // ==================================
+    // Unityとの同期前は
+    // orientationを絶対に送らない
+    // ==================================
+
+    if (
+        !synchronizedWithUnity
+    ) {
+        if (
+            unityReady
+        ) {
+
+            synchronizeWithUnity();
+        }
+
+        return;
+    }
 
 
     // Quaternionは q と -q が
@@ -1194,6 +1390,9 @@ function handleOrientation(event) {
 
                 type:
                     "orientation",
+
+                generation:
+                    generation,
 
                 x:
                     controllerRotation.x,
@@ -1295,16 +1494,26 @@ async function startSensors() {
 function calibrate() {
 
     if (
-        currentOrientation === null
+        currentOrientation
+        === null
     ) {
 
         return;
     }
 
 
-    setReferenceOrientation(
-        currentOrientation
-    );
+    if (
+        !unityReady
+    ) {
+
+        sensorStatus.textContent =
+            "Unityへの接続を待っています";
+
+        return;
+    }
+
+
+    synchronizeWithUnity();
 }
 
 
