@@ -11,7 +11,6 @@ const {
 const app = express();
 
 
-// publicフォルダーをWebページとして公開
 app.use(
     express.static(
         path.join(__dirname, "public")
@@ -19,7 +18,6 @@ app.use(
 );
 
 
-// 動作確認用
 app.get("/health", (req, res) => {
 
     res.json({
@@ -41,15 +39,8 @@ const wss =
     });
 
 
-// roomごとの接続を保存
-//
-// rooms = {
-//     demo: {
-//         phone: Set,
-//         unity: Set
-//     }
-// }
-const rooms = new Map();
+const rooms =
+    new Map();
 
 
 function getRoom(roomName) {
@@ -74,20 +65,67 @@ function cleanupRoom(roomName) {
     const room =
         rooms.get(roomName);
 
+
     if (!room) {
         return;
     }
 
+
     if (
-        room.phone.size === 0 &&
+        room.phone.size === 0
+        &&
         room.unity.size === 0
     ) {
+
         rooms.delete(roomName);
     }
 }
 
 
-// WebSocket接続
+function sendJson(
+    ws,
+    data
+) {
+
+    if (
+        ws.readyState
+        !== WebSocket.OPEN
+    ) {
+        return;
+    }
+
+
+    ws.send(
+        JSON.stringify(data)
+    );
+}
+
+
+function broadcastJson(
+    clients,
+    data
+) {
+
+    const json =
+        JSON.stringify(data);
+
+
+    for (
+        const client
+        of clients
+    ) {
+
+        if (
+            client.readyState
+            === WebSocket.OPEN
+        ) {
+
+            client.send(json);
+        }
+    }
+}
+
+
 wss.on(
     "connection",
     (ws, request) => {
@@ -112,7 +150,8 @@ wss.on(
 
 
         if (
-            role !== "phone" &&
+            role !== "phone"
+            &&
             role !== "unity"
         ) {
 
@@ -137,26 +176,75 @@ wss.on(
         );
 
 
-        // heartbeat用
-        ws.isAlive = true;
+        ws.isAlive =
+            true;
 
 
         ws.on(
             "pong",
             () => {
 
-                ws.isAlive = true;
-
+                ws.isAlive =
+                    true;
             }
         );
+
+
+        // =====================================
+        // Unityが接続した
+        // =====================================
+
+        if (
+            role === "unity"
+        ) {
+
+            // スマホへ
+            // 「Unityが操作受付可能になった」
+            // と通知する
+
+            broadcastJson(
+                room.phone,
+                {
+                    type:
+                        "unity-ready"
+                }
+            );
+        }
+
+
+        // =====================================
+        // スマホが後から接続した
+        // =====================================
+
+        if (
+            role === "phone"
+            &&
+            room.unity.size > 0
+        ) {
+
+            // Unityがすでにいるなら
+            // このスマホへ即通知
+
+            sendJson(
+                ws,
+                {
+                    type:
+                        "unity-ready"
+                }
+            );
+        }
 
 
         ws.on(
             "message",
             (data, isBinary) => {
 
-                // 今回はスマホ → Unityだけ転送
-                if (role !== "phone") {
+                // 今回ゲーム操作は
+                // phone → unityだけ
+
+                if (
+                    role !== "phone"
+                ) {
                     return;
                 }
 
@@ -174,7 +262,8 @@ wss.on(
                         unityClient.send(
                             data,
                             {
-                                binary: isBinary
+                                binary:
+                                    isBinary
                             }
                         );
                     }
@@ -189,7 +278,30 @@ wss.on(
 
                 room[role].delete(ws);
 
-                cleanupRoom(roomName);
+
+                // 最後のUnityが消えたら
+                // スマホへ通知
+
+                if (
+                    role === "unity"
+                    &&
+                    room.unity.size === 0
+                ) {
+
+                    broadcastJson(
+                        room.phone,
+                        {
+                            type:
+                                "unity-disconnected"
+                        }
+                    );
+                }
+
+
+                cleanupRoom(
+                    roomName
+                );
+
 
                 console.log(
                     `[disconnect] room=${roomName} role=${role}`
@@ -203,14 +315,12 @@ wss.on(
             (error) => {
 
                 console.error(error);
-
             }
         );
     }
 );
 
 
-// 死んでいる接続を掃除
 const heartbeatInterval =
     setInterval(
         () => {
@@ -220,7 +330,10 @@ const heartbeatInterval =
                 of wss.clients
             ) {
 
-                if (ws.isAlive === false) {
+                if (
+                    ws.isAlive
+                    === false
+                ) {
 
                     ws.terminate();
 
@@ -228,7 +341,9 @@ const heartbeatInterval =
                 }
 
 
-                ws.isAlive = false;
+                ws.isAlive =
+                    false;
+
 
                 ws.ping();
             }
@@ -245,13 +360,13 @@ wss.on(
         clearInterval(
             heartbeatInterval
         );
-
     }
 );
 
 
 const port =
-    process.env.PORT || 10000;
+    process.env.PORT
+    || 10000;
 
 
 server.listen(
@@ -262,6 +377,5 @@ server.listen(
         console.log(
             `Gyro Maze Relay started on port ${port}`
         );
-
     }
 );
