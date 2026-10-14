@@ -918,7 +918,6 @@ function setReferenceOrientation(
         null;
 
 
-    // 持ち方の簡単な表示
     const worldUp = {
 
         x: 0,
@@ -986,6 +985,24 @@ function setReferenceOrientation(
     sensorStatus.textContent =
         "基準設定済み / "
         + holdName;
+
+
+    if (
+        socket !== null
+        &&
+        socket.readyState
+        === WebSocket.OPEN
+    ) {
+
+        socket.send(
+
+            JSON.stringify({
+
+                type:
+                    "calibrate"
+            })
+        );
+    }
 }
 
 
