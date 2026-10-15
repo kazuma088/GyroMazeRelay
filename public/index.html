@@ -3,11 +3,7 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta
-        name="viewport"
-        content="width=device-width, initial-scale=1.0, user-scalable=no"
-    >
-
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>Gyro Maze Controller</title>
 
     <style>
@@ -264,11 +260,6 @@ const SEND_INTERVAL_MS =
     20;
 
 
-// WebSocketに送信待ちデータが溜まったら、古い姿勢を追加せず、その回は送信しない。
-const MAX_SOCKET_BUFFERED_BYTES =
-    4096;
-
-
 const controllerSessionId =
     (
         window.crypto
@@ -311,6 +302,89 @@ let reconnectTimer =
     null;
 
 
+let unityReady =
+    false;
+
+
+let lastUnityGeneration =
+    -1;
+
+
+function setUnityReady(
+    ready,
+    generation
+) {
+
+    const normalizedGeneration =
+        Number.isFinite(generation)
+        ?
+        generation
+        :
+        -1;
+
+
+    const newUnityConnection =
+        ready
+        &&
+        normalizedGeneration
+        !== lastUnityGeneration;
+
+
+    unityReady =
+        ready;
+
+
+    if (ready) {
+
+        lastUnityGeneration =
+            normalizedGeneration;
+    }
+
+
+    if (!ready) {
+
+        connectionStatus.textContent =
+            "中継サーバー接続済み / Unity待機中...";
+
+
+        previousSentQuaternion =
+            null;
+
+
+        return;
+    }
+
+
+    connectionStatus.textContent =
+        "Unity接続済み / Room: "
+        + roomName;
+
+
+    if (
+        !newUnityConnection
+    ) {
+
+        return;
+    }
+
+
+    if (
+        currentOrientation
+        !== null
+    ) {
+
+        setReferenceOrientation(
+            currentOrientation
+        );
+    }
+    else {
+
+        previousSentQuaternion =
+            null;
+    }
+}
+
+
 function connectWebSocket() {
 
     const protocol =
@@ -335,7 +409,11 @@ function connectWebSocket() {
 
 
     connectionStatus.textContent =
-        "サーバー接続中...";
+        "中継サーバー接続中...";
+
+
+    unityReady =
+        false;
 
 
     const newSocket =
@@ -354,18 +432,56 @@ function connectWebSocket() {
                 socket
                 !== newSocket
             ) {
+
                 return;
             }
 
 
             connectionStatus.textContent =
-                "接続済み / Room: "
-                + roomName;
+                "中継サーバー接続済み / Unity待機中...";
+        }
+    );
 
 
-            sendCurrentOrientation(
-                true
-            );
+    newSocket.addEventListener(
+        "message",
+        (event) => {
+
+            if (
+                socket
+                !== newSocket
+            ) {
+
+                return;
+            }
+
+
+            let message;
+
+
+            try {
+
+                message =
+                    JSON.parse(
+                        event.data
+                    );
+            }
+            catch {
+
+                return;
+            }
+
+
+            if (
+                message.type
+                === "relay_status"
+            ) {
+
+                setUnityReady(
+                    message.unityReady === true,
+                    message.unityGeneration
+                );
+            }
         }
     );
 
@@ -382,6 +498,14 @@ function connectWebSocket() {
                 socket =
                     null;
             }
+
+
+            unityReady =
+                false;
+
+
+            previousSentQuaternion =
+                null;
 
 
             connectionStatus.textContent =
@@ -405,6 +529,7 @@ function connectWebSocket() {
 
                         reconnectTimer =
                             null;
+
 
                         connectWebSocket();
 
@@ -484,7 +609,10 @@ function normalizeVector(v) {
 }
 
 
-function dotVector(a, b) {
+function dotVector(
+    a,
+    b
+) {
 
     return (
 
@@ -498,7 +626,10 @@ function dotVector(a, b) {
 }
 
 
-function crossVector(a, b) {
+function crossVector(
+    a,
+    b
+) {
 
     return {
 
@@ -744,10 +875,6 @@ function rotateVector(
 // ==================================================
 // DeviceOrientation -> Quaternion
 // ==================================================
-//
-// W3C Device Orientationの
-// Z-X'-Y'' 回転をQuaternionへ変換
-//
 
 function deviceOrientationToQuaternion(
     alpha,
@@ -895,8 +1022,7 @@ function quaternionFromBasis(
 
 
         w =
-            0.25
-            * s;
+            0.25 * s;
 
 
         x =
@@ -935,8 +1061,7 @@ function quaternionFromBasis(
 
 
         x =
-            0.25
-            * s;
+            0.25 * s;
 
 
         y =
@@ -973,8 +1098,7 @@ function quaternionFromBasis(
 
 
         y =
-            0.25
-            * s;
+            0.25 * s;
 
 
         z =
@@ -1009,8 +1133,7 @@ function quaternionFromBasis(
 
 
         z =
-            0.25
-            * s;
+            0.25 * s;
     }
 
 
@@ -1040,7 +1163,6 @@ function createControllerBasis(
     };
 
 
-    // スマホ画面の右方向
     const phoneRight =
         rotateVector(
 
@@ -1054,7 +1176,6 @@ function createControllerBasis(
         );
 
 
-    // スマホ画面の上方向
     const phoneTop =
         rotateVector(
 
@@ -1068,7 +1189,6 @@ function createControllerBasis(
         );
 
 
-    // スマホ右方向を現実世界の水平面へ投影
     let controllerRight = {
 
         x:
@@ -1082,7 +1202,6 @@ function createControllerBasis(
     };
 
 
-    // スマホX軸がほぼ垂直になった場合の保険
     if (
         vectorLength(
             controllerRight
@@ -1191,12 +1310,10 @@ let sendTimer =
     null;
 
 
-// キャリブレーションするたびに増える。
 let calibrationId =
     0;
 
 
-// スマホページ全体で単調増加。
 let sequence =
     0;
 
@@ -1308,7 +1425,6 @@ function setReferenceOrientation(
         );
 
 
-    // Unityへ「新しいキャリブレーションになった」と伝えるための番号
     calibrationId +=
         1;
 
@@ -1320,17 +1436,7 @@ function setReferenceOrientation(
     updateHoldName();
 
 
-    sendQuaternion(
-
-        {
-            x: 0,
-            y: 0,
-            z: 0,
-            w: 1
-        },
-
-        true
-    );
+    sendCurrentOrientation();
 }
 
 
@@ -1356,7 +1462,6 @@ function getControllerRotation(
     }
 
 
-    // 現実世界で、基準姿勢から現在姿勢までどう回転したか。
     const worldDelta =
         normalizeQuaternion(
 
@@ -1371,7 +1476,6 @@ function getControllerRotation(
         );
 
 
-    // 現実世界基準の回転をController Basisへ変換。
     return normalizeQuaternion(
 
         multiplyQuaternion(
@@ -1440,7 +1544,6 @@ function handleOrientation(
         );
 
 
-    // 最初の有効な姿勢を自動的に基準姿勢にする。
     if (
         referenceOrientation
         === null
@@ -1457,12 +1560,11 @@ function handleOrientation(
 // Latest-state sender
 // ==================================================
 
-function sendQuaternion(
-    q,
-    force
-) {
+function sendQuaternion(q) {
 
     if (
+        !unityReady
+        ||
         socket === null
         ||
         socket.readyState
@@ -1473,20 +1575,9 @@ function sendQuaternion(
     }
 
 
-    //
-    // 通信が詰まっている場合、
-    // 通常の姿勢データは追加しない。
-    //
-    // 過去の姿勢を溜めて後から再生するより、
-    // 次回の最新姿勢を送った方が
-    // コントローラー用途では正しい。
-    //
     if (
-        !force
-        &&
         socket.bufferedAmount
-        >
-        MAX_SOCKET_BUFFERED_BYTES
+        !== 0
     ) {
 
         return false;
@@ -1535,11 +1626,11 @@ function sendQuaternion(
 }
 
 
-function sendCurrentOrientation(
-    force = false
-) {
+function sendCurrentOrientation() {
 
     if (
+        !unityReady
+        ||
         currentOrientation
         === null
         ||
@@ -1582,10 +1673,7 @@ function sendCurrentOrientation(
 
     const sent =
         sendQuaternion(
-
-            controllerRotation,
-
-            force
+            controllerRotation
         );
 
 
@@ -1608,15 +1696,12 @@ function startSendLoop() {
     }
 
 
-    // センサーイベント頻度に依存せず、一定間隔で「現在の最新姿勢」だけ送る。
     sendTimer =
         setInterval(
 
             () => {
 
-                sendCurrentOrientation(
-                    false
-                );
+                sendCurrentOrientation();
 
             },
 
