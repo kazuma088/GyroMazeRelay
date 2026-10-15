@@ -270,11 +270,9 @@ let socket = null;
 function connectWebSocket() {
 
     const protocol =
-        window.location.protocol
-        === "https:"
+        window.location.protocol === "https:"
         ? "wss:"
         : "ws:";
-
 
     const url =
         protocol
@@ -282,20 +280,16 @@ function connectWebSocket() {
         + window.location.host
         + "/ws"
         + "?room="
-        + encodeURIComponent(
-            roomName
-        )
+        + encodeURIComponent(roomName)
         + "&role=phone";
 
 
     connectionStatus.textContent =
-        "中継サーバー接続中...";
+        "サーバー接続中...";
 
 
     socket =
-        new WebSocket(
-            url
-        );
+        new WebSocket(url);
 
 
     socket.addEventListener(
@@ -303,174 +297,8 @@ function connectWebSocket() {
         () => {
 
             connectionStatus.textContent =
-                "Unityを待っています...";
-
-
-            unityConnected =
-                false;
-
-
-            controlEnabled =
-                false;
-
-
-            startButton.disabled =
-                true;
-
-
-            calibrateButton.disabled =
-                true;
-        }
-    );
-
-
-    socket.addEventListener(
-        "message",
-        (event) => {
-
-            let data;
-
-
-            try {
-
-                data =
-                    JSON.parse(
-                        event.data
-                    );
-            }
-            catch {
-
-                return;
-            }
-
-
-            // =================================
-            // Unity接続状況
-            // =================================
-
-            if (
-                data.type
-                === "peer_status"
-            ) {
-
-                const wasConnected =
-                    unityConnected;
-
-
-                unityConnected =
-                    data.unityConnected
-                    === true;
-
-
-                if (
-                    !unityConnected
-                ) {
-
-                    connectionStatus.textContent =
-                        "Unityを待っています...";
-
-
-                    controlEnabled =
-                        false;
-
-
-                    waitingForCalibrationAck =
-                        false;
-
-
-                    captureReferenceOnNextSample =
-                        false;
-
-
-                    activeCalibrationId =
-                        -1;
-
-
-                    startButton.disabled =
-                        true;
-
-
-                    calibrateButton.disabled =
-                        true;
-
-
-                    return;
-                }
-
-
-                connectionStatus.textContent =
-                    "Unity接続済み";
-
-
-                if (
-                    !sensorStarted
-                ) {
-
-                    startButton.disabled =
-                        false;
-                }
-                else {
-
-                    startButton.disabled =
-                        true;
-
-
-                    calibrateButton.disabled =
-                        false;
-                }
-
-
-                // Unityが今まさに接続された場合
-                if (
-                    !wasConnected
-                    &&
-                    sensorStarted
-                ) {
-
-                    requestCalibration();
-                }
-
-
-                return;
-            }
-
-
-            // =================================
-            // Unity側リセット完了
-            // =================================
-
-            if (
-                data.type
-                === "calibrate_ack"
-            ) {
-
-                if (
-                    data.calibrationId
-                    !== calibrationId
-                ) {
-
-                    return;
-                }
-
-
-                waitingForCalibrationAck =
-                    false;
-
-
-                controlEnabled =
-                    false;
-
-
-                captureReferenceOnNextSample =
-                    true;
-
-
-                sensorStatus.textContent =
-                    "現在の姿勢を基準にしています...";
-
-
-                return;
-            }
+                "接続済み / Room: "
+                + roomName;
         }
     );
 
@@ -479,33 +307,8 @@ function connectWebSocket() {
         "close",
         () => {
 
-            unityConnected =
-                false;
-
-
-            controlEnabled =
-                false;
-
-
-            waitingForCalibrationAck =
-                false;
-
-
-            captureReferenceOnNextSample =
-                false;
-
-
             connectionStatus.textContent =
                 "切断 / 再接続中...";
-
-
-            startButton.disabled =
-                true;
-
-
-            calibrateButton.disabled =
-                true;
-
 
             setTimeout(
                 connectWebSocket,
@@ -999,8 +802,7 @@ function createControllerBasis(
         );
 
 
-    // スマホ右方向を
-    // 水平面へ投影
+    // スマホ右方向を水平面へ投影
     let controllerRight = {
 
         x: phoneRight.x,
@@ -1009,8 +811,7 @@ function createControllerBasis(
     };
 
 
-    // スマホを横倒しにして
-    // X軸がほぼ垂直になった場合の保険
+    // スマホを横倒しにしてX軸がほぼ垂直になった場合の保険
     if (
         vectorLength(
             controllerRight
@@ -1097,140 +898,6 @@ let lastSendTime = 0;
 let sequence = 0;
 
 
-// ========================================
-// 接続・キャリブレーション状態
-// ========================================
-
-let unityConnected =
-    false;
-
-
-// orientationをUnityへ送ってよいか
-let controlEnabled =
-    false;
-
-
-// Unityからreset完了通知を待っている
-let waitingForCalibrationAck =
-    false;
-
-
-// 次に届くセンサー値を新しい0姿勢として使う
-let captureReferenceOnNextSample =
-    false;
-
-
-// センサー初回値待ち
-let calibrationRequestPending =
-    false;
-
-
-// キャリブレーション世代番号
-let calibrationId =
-    0;
-
-
-// 現在有効な世代
-let activeCalibrationId =
-    -1;
-
-
-// Unityが来るまでは押せない
-startButton.disabled =
-    true;
-
-calibrateButton.disabled =
-    true;
-
-
-function requestCalibration() {
-
-    if (
-        !sensorStarted
-    ) {
-
-        sensorStatus.textContent =
-            "まずセンサーを開始してください";
-
-        return;
-    }
-
-
-    if (
-        !unityConnected
-        ||
-        socket === null
-        ||
-        socket.readyState
-            !== WebSocket.OPEN
-    ) {
-
-        sensorStatus.textContent =
-            "Unity接続待ち";
-
-        return;
-    }
-
-
-    // まだセンサー値そのものが1件も来ていない場合
-    if (
-        currentOrientation
-        === null
-    ) {
-
-        calibrationRequestPending =
-            true;
-
-
-        sensorStatus.textContent =
-            "センサー初回値待ち...";
-
-
-        return;
-    }
-
-
-    calibrationRequestPending =
-        false;
-
-
-    controlEnabled =
-        false;
-
-
-    waitingForCalibrationAck =
-        true;
-
-
-    captureReferenceOnNextSample =
-        false;
-
-
-    previousSentQuaternion =
-        null;
-
-
-    calibrationId++;
-
-
-    sensorStatus.textContent =
-        "Unityを初期姿勢へ戻しています...";
-
-
-    socket.send(
-
-        JSON.stringify({
-
-            type:
-                "calibrate",
-
-            calibrationId:
-                calibrationId
-        })
-    );
-}
-
-
 function setReferenceOrientation(
     orientation
 ) {
@@ -1249,6 +916,7 @@ function setReferenceOrientation(
         null;
 
 
+    // 持ち方の簡単な表示
     const worldUp = {
 
         x: 0,
@@ -1301,23 +969,21 @@ function setReferenceOrientation(
         "斜め持ち";
 
 
-    if (
-        flatness > 0.75
-    ) {
+    if (flatness > 0.75) {
 
         holdName =
             "水平持ち";
     }
-    else if (
-        uprightness > 0.75
-    ) {
+    else if (uprightness > 0.75) {
 
         holdName =
             "垂直持ち";
     }
 
 
-    return holdName;
+    sensorStatus.textContent =
+        "基準設定済み / "
+        + holdName;
 }
 
 
@@ -1340,8 +1006,6 @@ function getControllerRotation(
     }
 
 
-    // 現実空間で、基準姿勢から現在姿勢までどのように回転したか
-    // current × inverse(reference)
     const worldDelta =
         normalizeQuaternion(
 
@@ -1356,8 +1020,6 @@ function getControllerRotation(
         );
 
 
-    // 実世界の回転をController Basisへ変換
-    // inverse(B) × rotation × B
     const controllerRotation =
         normalizeQuaternion(
 
@@ -1381,9 +1043,7 @@ function getControllerRotation(
 }
 
 
-function handleOrientation(
-    event
-) {
+function handleOrientation(event) {
 
     if (
         event.alpha === null
@@ -1411,11 +1071,9 @@ function handleOrientation(
         alpha.toFixed(1)
         + "°";
 
-
     betaElement.textContent =
         beta.toFixed(1)
         + "°";
-
 
     gammaElement.textContent =
         gamma.toFixed(1)
@@ -1430,73 +1088,14 @@ function handleOrientation(
         );
 
 
-    // =================================
-    // センサー初回値待ちだった場合
-    // =================================
-
+    // 最初の姿勢を自動基準にする
     if (
-        calibrationRequestPending
+        referenceOrientation === null
     ) {
 
-        requestCalibration();
-
-        return;
-    }
-
-
-    // UnityからACKが来た直後この瞬間のスマホ姿勢を新しいゼロにする
-    if (
-        captureReferenceOnNextSample
-    ) {
-
-        const holdName =
-            setReferenceOrientation(
-                currentOrientation
-            );
-
-
-        captureReferenceOnNextSample =
-            false;
-
-
-        activeCalibrationId =
-            calibrationId;
-
-
-        controlEnabled =
-            true;
-
-
-        waitingForCalibrationAck =
-            false;
-
-
-        lastSendTime =
-            performance.now();
-
-
-        sensorStatus.textContent =
-            "操作可能 / "
-            + holdName;
-
-        return;
-    }
-
-
-    // =================================
-    // 握手完了前は絶対送信しない
-    // =================================
-
-    if (
-        !controlEnabled
-        ||
-        waitingForCalibrationAck
-        ||
-        referenceOrientation
-            === null
-    ) {
-
-        return;
+        setReferenceOrientation(
+            currentOrientation
+        );
     }
 
 
@@ -1507,8 +1106,7 @@ function handleOrientation(
 
 
     if (
-        previousSentQuaternion
-            !== null
+        previousSentQuaternion !== null
         &&
         dotQuaternion(
             previousSentQuaternion,
@@ -1531,6 +1129,7 @@ function handleOrientation(
         performance.now();
 
 
+    // 最大約60Hz
     if (
         now - lastSendTime
         < 16
@@ -1548,7 +1147,7 @@ function handleOrientation(
         socket !== null
         &&
         socket.readyState
-            === WebSocket.OPEN
+        === WebSocket.OPEN
     ) {
 
         socket.send(
@@ -1557,9 +1156,6 @@ function handleOrientation(
 
                 type:
                     "orientation",
-
-                calibrationId:
-                    activeCalibrationId,
 
                 x:
                     controllerRotation.x,
@@ -1586,21 +1182,7 @@ function handleOrientation(
 
 async function startSensors() {
 
-    if (
-        sensorStarted
-    ) {
-
-        return;
-    }
-
-
-    if (
-        !unityConnected
-    ) {
-
-        sensorStatus.textContent =
-            "Unity接続待ち";
-
+    if (sensorStarted) {
         return;
     }
 
@@ -1659,30 +1241,12 @@ async function startSensors() {
             true;
 
 
-        startButton.disabled =
-            true;
-
-
-        calibrateButton.disabled =
-            false;
-
-
         sensorStatus.textContent =
-            "センサー初回値待ち...";
-
-
-        // センサー値が届いたら自動的に握手開始
-        calibrationRequestPending =
-            true;
+            "センサー待機中...";
     }
-    catch (
-        error
-    ) {
+    catch (error) {
 
-        console.error(
-            error
-        );
-
+        console.error(error);
 
         sensorStatus.textContent =
             "センサー開始失敗";
@@ -1691,7 +1255,18 @@ async function startSensors() {
 
 
 function calibrate() {
-    requestCalibration();
+
+    if (
+        currentOrientation === null
+    ) {
+
+        return;
+    }
+
+
+    setReferenceOrientation(
+        currentOrientation
+    );
 }
 
 
