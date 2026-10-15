@@ -56,29 +56,8 @@ function getRoom(roomName) {
         );
     }
 
+
     return rooms.get(roomName);
-}
-
-
-function cleanupRoom(roomName) {
-
-    const room =
-        rooms.get(roomName);
-
-
-    if (!room) {
-        return;
-    }
-
-
-    if (
-        room.phone.size === 0
-        &&
-        room.unity.size === 0
-    ) {
-
-        rooms.delete(roomName);
-    }
 }
 
 
@@ -101,27 +80,79 @@ function sendJson(
 }
 
 
-function broadcastJson(
-    clients,
-    data
+function broadcastPeerStatus(
+    roomName
 ) {
 
-    const json =
-        JSON.stringify(data);
+    const room =
+        rooms.get(roomName);
+
+
+    if (!room) {
+        return;
+    }
+
+
+    const status = {
+
+        type:
+            "peer_status",
+
+        unityConnected:
+            room.unity.size > 0,
+
+        phoneConnected:
+            room.phone.size > 0
+    };
 
 
     for (
         const client
-        of clients
+        of room.phone
     ) {
 
-        if (
-            client.readyState
-            === WebSocket.OPEN
-        ) {
+        sendJson(
+            client,
+            status
+        );
+    }
 
-            client.send(json);
-        }
+
+    for (
+        const client
+        of room.unity
+    ) {
+
+        sendJson(
+            client,
+            status
+        );
+    }
+}
+
+
+function cleanupRoom(
+    roomName
+) {
+
+    const room =
+        rooms.get(roomName);
+
+
+    if (!room) {
+        return;
+    }
+
+
+    if (
+        room.phone.size === 0
+        &&
+        room.unity.size === 0
+    ) {
+
+        rooms.delete(
+            roomName
+        );
     }
 }
 
@@ -142,7 +173,10 @@ wss.on(
                 url.searchParams.get("room")
                 || "demo"
             )
-            .slice(0, 64);
+            .slice(
+                0,
+                64
+            );
 
 
         const role =
@@ -165,10 +199,14 @@ wss.on(
 
 
         const room =
-            getRoom(roomName);
+            getRoom(
+                roomName
+            );
 
 
-        room[role].add(ws);
+        room[role].add(
+            ws
+        );
 
 
         console.log(
@@ -190,76 +228,42 @@ wss.on(
         );
 
 
-        // =====================================
-        // Unityが接続した
-        // =====================================
-
-        if (
-            role === "unity"
-        ) {
-
-            // スマホへ
-            // 「Unityが操作受付可能になった」
-            // と通知する
-
-            broadcastJson(
-                room.phone,
-                {
-                    type:
-                        "unity-ready"
-                }
-            );
-        }
-
-
-        // =====================================
-        // スマホが後から接続した
-        // =====================================
-
-        if (
-            role === "phone"
-            &&
-            room.unity.size > 0
-        ) {
-
-            // Unityがすでにいるなら
-            // このスマホへ即通知
-
-            sendJson(
-                ws,
-                {
-                    type:
-                        "unity-ready"
-                }
-            );
-        }
+        // 接続状況を両者へ通知
+        broadcastPeerStatus(
+            roomName
+        );
 
 
         ws.on(
             "message",
-            (data, isBinary) => {
+            (
+                data,
+                isBinary
+            ) => {
 
-                // 今回ゲーム操作は
-                // phone → unityだけ
+                // -------------------------
+                // スマホ → Unity
+                // Unity → スマホ
+                // の両方を許可
+                // -------------------------
 
-                if (
-                    role !== "phone"
-                ) {
-                    return;
-                }
+                const targets =
+                    role === "phone"
+                    ? room.unity
+                    : room.phone;
 
 
                 for (
-                    const unityClient
-                    of room.unity
+                    const client
+                    of targets
                 ) {
 
                     if (
-                        unityClient.readyState
+                        client.readyState
                         === WebSocket.OPEN
                     ) {
 
-                        unityClient.send(
+                        client.send(
                             data,
                             {
                                 binary:
@@ -276,35 +280,23 @@ wss.on(
             "close",
             () => {
 
-                room[role].delete(ws);
-
-
-                // 最後のUnityが消えたら
-                // スマホへ通知
-
-                if (
-                    role === "unity"
-                    &&
-                    room.unity.size === 0
-                ) {
-
-                    broadcastJson(
-                        room.phone,
-                        {
-                            type:
-                                "unity-disconnected"
-                        }
-                    );
-                }
-
-
-                cleanupRoom(
-                    roomName
+                room[role].delete(
+                    ws
                 );
 
 
                 console.log(
                     `[disconnect] room=${roomName} role=${role}`
+                );
+
+
+                broadcastPeerStatus(
+                    roomName
+                );
+
+
+                cleanupRoom(
+                    roomName
                 );
             }
         );
@@ -314,7 +306,9 @@ wss.on(
             "error",
             (error) => {
 
-                console.error(error);
+                console.error(
+                    error
+                );
             }
         );
     }
@@ -331,8 +325,7 @@ const heartbeatInterval =
             ) {
 
                 if (
-                    ws.isAlive
-                    === false
+                    ws.isAlive === false
                 ) {
 
                     ws.terminate();
