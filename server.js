@@ -11,6 +11,7 @@ const {
 const app = express();
 
 
+// publicフォルダーをWebページとして公開
 app.use(
     express.static(
         path.join(__dirname, "public")
@@ -18,6 +19,7 @@ app.use(
 );
 
 
+// 動作確認用
 app.get("/health", (req, res) => {
 
     res.json({
@@ -39,8 +41,15 @@ const wss =
     });
 
 
-const rooms =
-    new Map();
+// roomごとの接続を保存
+//
+// rooms = {
+//     demo: {
+//         phone: Set,
+//         unity: Set
+//     }
+// }
+const rooms = new Map();
 
 
 function getRoom(roomName) {
@@ -56,107 +65,29 @@ function getRoom(roomName) {
         );
     }
 
-
     return rooms.get(roomName);
 }
 
 
-function sendJson(
-    ws,
-    data
-) {
-
-    if (
-        ws.readyState
-        !== WebSocket.OPEN
-    ) {
-        return;
-    }
-
-
-    ws.send(
-        JSON.stringify(data)
-    );
-}
-
-
-function broadcastPeerStatus(
-    roomName
-) {
+function cleanupRoom(roomName) {
 
     const room =
         rooms.get(roomName);
-
 
     if (!room) {
         return;
     }
 
-
-    const status = {
-
-        type:
-            "peer_status",
-
-        unityConnected:
-            room.unity.size > 0,
-
-        phoneConnected:
-            room.phone.size > 0
-    };
-
-
-    for (
-        const client
-        of room.phone
-    ) {
-
-        sendJson(
-            client,
-            status
-        );
-    }
-
-
-    for (
-        const client
-        of room.unity
-    ) {
-
-        sendJson(
-            client,
-            status
-        );
-    }
-}
-
-
-function cleanupRoom(
-    roomName
-) {
-
-    const room =
-        rooms.get(roomName);
-
-
-    if (!room) {
-        return;
-    }
-
-
     if (
-        room.phone.size === 0
-        &&
+        room.phone.size === 0 &&
         room.unity.size === 0
     ) {
-
-        rooms.delete(
-            roomName
-        );
+        rooms.delete(roomName);
     }
 }
 
 
+// WebSocket接続
 wss.on(
     "connection",
     (ws, request) => {
@@ -173,10 +104,7 @@ wss.on(
                 url.searchParams.get("room")
                 || "demo"
             )
-            .slice(
-                0,
-                64
-            );
+            .slice(0, 64);
 
 
         const role =
@@ -184,8 +112,7 @@ wss.on(
 
 
         if (
-            role !== "phone"
-            &&
+            role !== "phone" &&
             role !== "unity"
         ) {
 
@@ -199,14 +126,10 @@ wss.on(
 
 
         const room =
-            getRoom(
-                roomName
-            );
+            getRoom(roomName);
 
 
-        room[role].add(
-            ws
-        );
+        room[role].add(ws);
 
 
         console.log(
@@ -214,60 +137,44 @@ wss.on(
         );
 
 
-        ws.isAlive =
-            true;
+        // heartbeat用
+        ws.isAlive = true;
 
 
         ws.on(
             "pong",
             () => {
 
-                ws.isAlive =
-                    true;
+                ws.isAlive = true;
+
             }
-        );
-
-
-        // 接続状況を両者へ通知
-        broadcastPeerStatus(
-            roomName
         );
 
 
         ws.on(
             "message",
-            (
-                data,
-                isBinary
-            ) => {
+            (data, isBinary) => {
 
-                // -------------------------
-                // スマホ → Unity
-                // Unity → スマホ
-                // の両方を許可
-                // -------------------------
-
-                const targets =
-                    role === "phone"
-                    ? room.unity
-                    : room.phone;
+                // 今回はスマホ → Unityだけ転送
+                if (role !== "phone") {
+                    return;
+                }
 
 
                 for (
-                    const client
-                    of targets
+                    const unityClient
+                    of room.unity
                 ) {
 
                     if (
-                        client.readyState
+                        unityClient.readyState
                         === WebSocket.OPEN
                     ) {
 
-                        client.send(
+                        unityClient.send(
                             data,
                             {
-                                binary:
-                                    isBinary
+                                binary: isBinary
                             }
                         );
                     }
@@ -280,23 +187,12 @@ wss.on(
             "close",
             () => {
 
-                room[role].delete(
-                    ws
-                );
+                room[role].delete(ws);
 
+                cleanupRoom(roomName);
 
                 console.log(
                     `[disconnect] room=${roomName} role=${role}`
-                );
-
-
-                broadcastPeerStatus(
-                    roomName
-                );
-
-
-                cleanupRoom(
-                    roomName
                 );
             }
         );
@@ -306,15 +202,15 @@ wss.on(
             "error",
             (error) => {
 
-                console.error(
-                    error
-                );
+                console.error(error);
+
             }
         );
     }
 );
 
 
+// 死んでいる接続を掃除
 const heartbeatInterval =
     setInterval(
         () => {
@@ -324,9 +220,7 @@ const heartbeatInterval =
                 of wss.clients
             ) {
 
-                if (
-                    ws.isAlive === false
-                ) {
+                if (ws.isAlive === false) {
 
                     ws.terminate();
 
@@ -334,9 +228,7 @@ const heartbeatInterval =
                 }
 
 
-                ws.isAlive =
-                    false;
-
+                ws.isAlive = false;
 
                 ws.ping();
             }
@@ -353,13 +245,13 @@ wss.on(
         clearInterval(
             heartbeatInterval
         );
+
     }
 );
 
 
 const port =
-    process.env.PORT
-    || 10000;
+    process.env.PORT || 10000;
 
 
 server.listen(
@@ -370,5 +262,6 @@ server.listen(
         console.log(
             `Gyro Maze Relay started on port ${port}`
         );
+
     }
 );
