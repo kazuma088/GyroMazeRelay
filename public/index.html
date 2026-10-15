@@ -3,7 +3,11 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0, user-scalable=no"
+    >
+
     <title>Gyro Maze Controller</title>
 
     <style>
@@ -123,6 +127,7 @@
     </style>
 
 </head>
+
 
 <body>
 
@@ -252,6 +257,38 @@ const calibrateButton =
 
 
 // ==================================================
+// Settings
+// ==================================================
+
+const SEND_INTERVAL_MS =
+    20;
+
+
+// WebSocketに送信待ちデータが溜まったら、古い姿勢を追加せず、その回は送信しない。
+const MAX_SOCKET_BUFFERED_BYTES =
+    4096;
+
+
+const controllerSessionId =
+    (
+        window.crypto
+        &&
+        typeof window.crypto.randomUUID
+        === "function"
+    )
+    ?
+    window.crypto.randomUUID()
+    :
+    (
+        Date.now().toString(36)
+        + "-"
+        + Math.random()
+            .toString(36)
+            .slice(2)
+    );
+
+
+// ==================================================
 // WebSocket
 // ==================================================
 
@@ -260,19 +297,30 @@ const pageParameters =
         window.location.search
     );
 
+
 const roomName =
     pageParameters.get("room")
     || "demo";
 
-let socket = null;
+
+let socket =
+    null;
+
+
+let reconnectTimer =
+    null;
 
 
 function connectWebSocket() {
 
     const protocol =
-        window.location.protocol === "https:"
-        ? "wss:"
-        : "ws:";
+        window.location.protocol
+        === "https:"
+        ?
+        "wss:"
+        :
+        "ws:";
+
 
     const url =
         protocol
@@ -280,7 +328,9 @@ function connectWebSocket() {
         + window.location.host
         + "/ws"
         + "?room="
-        + encodeURIComponent(roomName)
+        + encodeURIComponent(
+            roomName
+        )
         + "&role=phone";
 
 
@@ -288,42 +338,95 @@ function connectWebSocket() {
         "サーバー接続中...";
 
 
-    socket =
+    const newSocket =
         new WebSocket(url);
 
 
-    socket.addEventListener(
+    socket =
+        newSocket;
+
+
+    newSocket.addEventListener(
         "open",
         () => {
+
+            if (
+                socket
+                !== newSocket
+            ) {
+                return;
+            }
+
 
             connectionStatus.textContent =
                 "接続済み / Room: "
                 + roomName;
-        }
-    );
 
 
-    socket.addEventListener(
-        "close",
-        () => {
-
-            connectionStatus.textContent =
-                "切断 / 再接続中...";
-
-            setTimeout(
-                connectWebSocket,
-                2000
+            sendCurrentOrientation(
+                true
             );
         }
     );
 
 
-    socket.addEventListener(
+    newSocket.addEventListener(
+        "close",
+        () => {
+
+            if (
+                socket
+                === newSocket
+            ) {
+
+                socket =
+                    null;
+            }
+
+
+            connectionStatus.textContent =
+                "切断 / 再接続中...";
+
+
+            if (
+                reconnectTimer
+                !== null
+            ) {
+
+                clearTimeout(
+                    reconnectTimer
+                );
+            }
+
+
+            reconnectTimer =
+                setTimeout(
+                    () => {
+
+                        reconnectTimer =
+                            null;
+
+                        connectWebSocket();
+
+                    },
+                    2000
+                );
+        }
+    );
+
+
+    newSocket.addEventListener(
         "error",
         () => {
 
-            connectionStatus.textContent =
-                "通信エラー";
+            if (
+                socket
+                === newSocket
+            ) {
+
+                connectionStatus.textContent =
+                    "通信エラー";
+            }
         }
     );
 }
@@ -336,9 +439,13 @@ function connectWebSocket() {
 function vectorLength(v) {
 
     return Math.sqrt(
+
         v.x * v.x
-        + v.y * v.y
-        + v.z * v.z
+        +
+        v.y * v.y
+        +
+        v.z * v.z
+
     );
 }
 
@@ -349,9 +456,13 @@ function normalizeVector(v) {
         vectorLength(v);
 
 
-    if (length < 0.000001) {
+    if (
+        length
+        < 0.000001
+    ) {
 
         return {
+
             x: 0,
             y: 0,
             z: 0
@@ -361,9 +472,14 @@ function normalizeVector(v) {
 
     return {
 
-        x: v.x / length,
-        y: v.y / length,
-        z: v.z / length
+        x:
+            v.x / length,
+
+        y:
+            v.y / length,
+
+        z:
+            v.z / length
     };
 }
 
@@ -371,9 +487,13 @@ function normalizeVector(v) {
 function dotVector(a, b) {
 
     return (
+
         a.x * b.x
-        + a.y * b.y
-        + a.z * b.z
+        +
+        a.y * b.y
+        +
+        a.z * b.z
+
     );
 }
 
@@ -384,15 +504,18 @@ function crossVector(a, b) {
 
         x:
             a.y * b.z
-            - a.z * b.y,
+            -
+            a.z * b.y,
 
         y:
             a.z * b.x
-            - a.x * b.z,
+            -
+            a.x * b.z,
 
         z:
             a.x * b.y
-            - a.y * b.x
+            -
+            a.y * b.x
     };
 }
 
@@ -405,16 +528,25 @@ function normalizeQuaternion(q) {
 
     const length =
         Math.sqrt(
+
             q.x * q.x
-            + q.y * q.y
-            + q.z * q.z
-            + q.w * q.w
+            +
+            q.y * q.y
+            +
+            q.z * q.z
+            +
+            q.w * q.w
+
         );
 
 
-    if (length < 0.000001) {
+    if (
+        length
+        < 0.000001
+    ) {
 
         return {
+
             x: 0,
             y: 0,
             z: 0,
@@ -425,41 +557,63 @@ function normalizeQuaternion(q) {
 
     return {
 
-        x: q.x / length,
-        y: q.y / length,
-        z: q.z / length,
-        w: q.w / length
+        x:
+            q.x / length,
+
+        y:
+            q.y / length,
+
+        z:
+            q.z / length,
+
+        w:
+            q.w / length
     };
 }
 
 
-function multiplyQuaternion(a, b) {
+function multiplyQuaternion(
+    a,
+    b
+) {
 
     return {
 
         x:
             a.w * b.x
-            + a.x * b.w
-            + a.y * b.z
-            - a.z * b.y,
+            +
+            a.x * b.w
+            +
+            a.y * b.z
+            -
+            a.z * b.y,
 
         y:
             a.w * b.y
-            - a.x * b.z
-            + a.y * b.w
-            + a.z * b.x,
+            -
+            a.x * b.z
+            +
+            a.y * b.w
+            +
+            a.z * b.x,
 
         z:
             a.w * b.z
-            + a.x * b.y
-            - a.y * b.x
-            + a.z * b.w,
+            +
+            a.x * b.y
+            -
+            a.y * b.x
+            +
+            a.z * b.w,
 
         w:
             a.w * b.w
-            - a.x * b.x
-            - a.y * b.y
-            - a.z * b.z
+            -
+            a.x * b.x
+            -
+            a.y * b.y
+            -
+            a.z * b.z
     };
 }
 
@@ -467,15 +621,23 @@ function multiplyQuaternion(a, b) {
 function inverseQuaternion(q) {
 
     const lengthSquared =
+
         q.x * q.x
-        + q.y * q.y
-        + q.z * q.z
-        + q.w * q.w;
+        +
+        q.y * q.y
+        +
+        q.z * q.z
+        +
+        q.w * q.w;
 
 
-    if (lengthSquared < 0.000001) {
+    if (
+        lengthSquared
+        < 0.000001
+    ) {
 
         return {
+
             x: 0,
             y: 0,
             z: 0,
@@ -486,21 +648,40 @@ function inverseQuaternion(q) {
 
     return {
 
-        x: -q.x / lengthSquared,
-        y: -q.y / lengthSquared,
-        z: -q.z / lengthSquared,
-        w:  q.w / lengthSquared
+        x:
+            -q.x
+            / lengthSquared,
+
+        y:
+            -q.y
+            / lengthSquared,
+
+        z:
+            -q.z
+            / lengthSquared,
+
+        w:
+            q.w
+            / lengthSquared
     };
 }
 
 
-function dotQuaternion(a, b) {
+function dotQuaternion(
+    a,
+    b
+) {
 
     return (
+
         a.x * b.x
-        + a.y * b.y
-        + a.z * b.z
-        + a.w * b.w
+        +
+        a.y * b.y
+        +
+        a.z * b.z
+        +
+        a.w * b.w
+
     );
 }
 
@@ -509,16 +690,26 @@ function negateQuaternion(q) {
 
     return {
 
-        x: -q.x,
-        y: -q.y,
-        z: -q.z,
-        w: -q.w
+        x:
+            -q.x,
+
+        y:
+            -q.y,
+
+        z:
+            -q.z,
+
+        w:
+            -q.w
     };
 }
 
 
 // QuaternionでVectorを回す
-function rotateVector(q, v) {
+function rotateVector(
+    q,
+    v
+) {
 
     const vectorQuaternion = {
 
@@ -569,56 +760,72 @@ function deviceOrientationToQuaternion(
 
 
     const x =
-        beta * degToRad;
+        beta
+        * degToRad;
 
     const y =
-        gamma * degToRad;
+        gamma
+        * degToRad;
 
     const z =
-        alpha * degToRad;
+        alpha
+        * degToRad;
 
 
     const cX =
-        Math.cos(x / 2);
+        Math.cos(
+            x / 2
+        );
 
     const cY =
-        Math.cos(y / 2);
+        Math.cos(
+            y / 2
+        );
 
     const cZ =
-        Math.cos(z / 2);
+        Math.cos(
+            z / 2
+        );
 
 
     const sX =
-        Math.sin(x / 2);
+        Math.sin(
+            x / 2
+        );
 
     const sY =
-        Math.sin(y / 2);
+        Math.sin(
+            y / 2
+        );
 
     const sZ =
-        Math.sin(z / 2);
+        Math.sin(
+            z / 2
+        );
 
 
-    const q = {
+    return normalizeQuaternion({
 
         w:
             cX * cY * cZ
-            - sX * sY * sZ,
+            -
+            sX * sY * sZ,
 
         x:
             sX * cY * cZ
-            - cX * sY * sZ,
+            -
+            cX * sY * sZ,
 
         y:
             cX * sY * cZ
-            + sX * cY * sZ,
+            +
+            sX * cY * sZ,
 
         z:
             cX * cY * sZ
-            + sX * sY * cZ
-    };
-
-
-    return normalizeQuaternion(q);
+            +
+            sX * sY * cZ
+    });
 }
 
 
@@ -632,23 +839,42 @@ function quaternionFromBasis(
     zAxis
 ) {
 
-    // 各軸を回転行列の列として使う
+    const m00 =
+        xAxis.x;
 
-    const m00 = xAxis.x;
-    const m01 = yAxis.x;
-    const m02 = zAxis.x;
+    const m01 =
+        yAxis.x;
 
-    const m10 = xAxis.y;
-    const m11 = yAxis.y;
-    const m12 = zAxis.y;
+    const m02 =
+        zAxis.x;
 
-    const m20 = xAxis.z;
-    const m21 = yAxis.z;
-    const m22 = zAxis.z;
+
+    const m10 =
+        xAxis.y;
+
+    const m11 =
+        yAxis.y;
+
+    const m12 =
+        zAxis.y;
+
+
+    const m20 =
+        xAxis.z;
+
+    const m21 =
+        yAxis.z;
+
+    const m22 =
+        zAxis.z;
 
 
     const trace =
-        m00 + m11 + m22;
+        m00
+        +
+        m11
+        +
+        m22;
 
 
     let x;
@@ -657,23 +883,35 @@ function quaternionFromBasis(
     let w;
 
 
-    if (trace > 0) {
+    if (
+        trace > 0
+    ) {
 
         const s =
             Math.sqrt(
                 trace + 1
-            ) * 2;
+            )
+            * 2;
 
-        w = 0.25 * s;
+
+        w =
+            0.25
+            * s;
+
 
         x =
-            (m21 - m12) / s;
+            (m21 - m12)
+            / s;
+
 
         y =
-            (m02 - m20) / s;
+            (m02 - m20)
+            / s;
+
 
         z =
-            (m10 - m01) / s;
+            (m10 - m01)
+            / s;
     }
     else if (
         m00 > m11
@@ -687,21 +925,32 @@ function quaternionFromBasis(
                 + m00
                 - m11
                 - m22
-            ) * 2;
+            )
+            * 2;
+
 
         w =
-            (m21 - m12) / s;
+            (m21 - m12)
+            / s;
+
 
         x =
-            0.25 * s;
+            0.25
+            * s;
+
 
         y =
-            (m01 + m10) / s;
+            (m01 + m10)
+            / s;
+
 
         z =
-            (m02 + m20) / s;
+            (m02 + m20)
+            / s;
     }
-    else if (m11 > m22) {
+    else if (
+        m11 > m22
+    ) {
 
         const s =
             Math.sqrt(
@@ -709,19 +958,28 @@ function quaternionFromBasis(
                 + m11
                 - m00
                 - m22
-            ) * 2;
+            )
+            * 2;
+
 
         w =
-            (m02 - m20) / s;
+            (m02 - m20)
+            / s;
+
 
         x =
-            (m01 + m10) / s;
+            (m01 + m10)
+            / s;
+
 
         y =
-            0.25 * s;
+            0.25
+            * s;
+
 
         z =
-            (m12 + m21) / s;
+            (m12 + m21)
+            / s;
     }
     else {
 
@@ -731,19 +989,28 @@ function quaternionFromBasis(
                 + m22
                 - m00
                 - m11
-            ) * 2;
+            )
+            * 2;
+
 
         w =
-            (m10 - m01) / s;
+            (m10 - m01)
+            / s;
+
 
         x =
-            (m02 + m20) / s;
+            (m02 + m20)
+            / s;
+
 
         y =
-            (m12 + m21) / s;
+            (m12 + m21)
+            / s;
+
 
         z =
-            0.25 * s;
+            0.25
+            * s;
     }
 
 
@@ -760,11 +1027,6 @@ function quaternionFromBasis(
 // ==================================================
 // Controller Basis
 // ==================================================
-//
-// スマホ自身の軸ではなく、
-// 実世界の「上」を基準にした
-// コントローラー座標を作る。
-//
 
 function createControllerBasis(
     referenceQuaternion
@@ -781,7 +1043,9 @@ function createControllerBasis(
     // スマホ画面の右方向
     const phoneRight =
         rotateVector(
+
             referenceQuaternion,
+
             {
                 x: 1,
                 y: 0,
@@ -793,7 +1057,9 @@ function createControllerBasis(
     // スマホ画面の上方向
     const phoneTop =
         rotateVector(
+
             referenceQuaternion,
+
             {
                 x: 0,
                 y: 1,
@@ -802,39 +1068,53 @@ function createControllerBasis(
         );
 
 
-    // スマホ右方向を水平面へ投影
+    // スマホ右方向を現実世界の水平面へ投影
     let controllerRight = {
 
-        x: phoneRight.x,
-        y: phoneRight.y,
-        z: 0
+        x:
+            phoneRight.x,
+
+        y:
+            phoneRight.y,
+
+        z:
+            0
     };
 
 
-    // スマホを横倒しにしてX軸がほぼ垂直になった場合の保険
+    // スマホX軸がほぼ垂直になった場合の保険
     if (
         vectorLength(
             controllerRight
-        ) < 0.1
+        )
+        < 0.1
     ) {
 
         const horizontalTop = {
 
-            x: phoneTop.x,
-            y: phoneTop.y,
-            z: 0
+            x:
+                phoneTop.x,
+
+            y:
+                phoneTop.y,
+
+            z:
+                0
         };
 
 
         if (
             vectorLength(
                 horizontalTop
-            ) > 0.1
+            )
+            > 0.1
         ) {
 
             controllerRight =
                 crossVector(
+
                     horizontalTop,
+
                     worldUp
                 );
         }
@@ -860,63 +1140,78 @@ function createControllerBasis(
         worldUp;
 
 
-    // 右手座標系側でのZ軸
     const controllerBack =
         normalizeVector(
 
             crossVector(
+
                 controllerRight,
+
                 controllerUp
             )
         );
 
 
     return quaternionFromBasis(
+
         controllerRight,
+
         controllerUp,
+
         controllerBack
     );
 }
 
 
 // ==================================================
-// Sensor
+// Sensor / Calibration
 // ==================================================
 
-let currentOrientation = null;
-
-let referenceOrientation = null;
-
-let controllerBasis = null;
-
-let previousSentQuaternion = null;
-
-let sensorStarted = false;
-
-let lastSendTime = 0;
-
-let sequence = 0;
+let currentOrientation =
+    null;
 
 
-function setReferenceOrientation(
-    orientation
-) {
-
-    referenceOrientation =
-        orientation;
+let referenceOrientation =
+    null;
 
 
-    controllerBasis =
-        createControllerBasis(
-            referenceOrientation
-        );
+let controllerBasis =
+    null;
 
 
-    previousSentQuaternion =
-        null;
+let previousSentQuaternion =
+    null;
 
 
-    // 持ち方の簡単な表示
+let sensorStarted =
+    false;
+
+
+let sendTimer =
+    null;
+
+
+// キャリブレーションするたびに増える。
+let calibrationId =
+    0;
+
+
+// スマホページ全体で単調増加。
+let sequence =
+    0;
+
+
+function updateHoldName() {
+
+    if (
+        referenceOrientation
+        === null
+    ) {
+
+        return;
+    }
+
+
     const worldUp = {
 
         x: 0,
@@ -927,7 +1222,9 @@ function setReferenceOrientation(
 
     const phoneNormal =
         rotateVector(
+
             referenceOrientation,
+
             {
                 x: 0,
                 y: 0,
@@ -938,7 +1235,9 @@ function setReferenceOrientation(
 
     const phoneTop =
         rotateVector(
+
             referenceOrientation,
+
             {
                 x: 0,
                 y: 1,
@@ -949,6 +1248,7 @@ function setReferenceOrientation(
 
     const flatness =
         Math.abs(
+
             dotVector(
                 phoneNormal,
                 worldUp
@@ -958,6 +1258,7 @@ function setReferenceOrientation(
 
     const uprightness =
         Math.abs(
+
             dotVector(
                 phoneTop,
                 worldUp
@@ -969,12 +1270,16 @@ function setReferenceOrientation(
         "斜め持ち";
 
 
-    if (flatness > 0.75) {
+    if (
+        flatness > 0.75
+    ) {
 
         holdName =
             "水平持ち";
     }
-    else if (uprightness > 0.75) {
+    else if (
+        uprightness > 0.75
+    ) {
 
         holdName =
             "垂直持ち";
@@ -987,17 +1292,62 @@ function setReferenceOrientation(
 }
 
 
+function setReferenceOrientation(
+    orientation
+) {
+
+    referenceOrientation =
+        normalizeQuaternion(
+            orientation
+        );
+
+
+    controllerBasis =
+        createControllerBasis(
+            referenceOrientation
+        );
+
+
+    // Unityへ「新しいキャリブレーションになった」と伝えるための番号
+    calibrationId +=
+        1;
+
+
+    previousSentQuaternion =
+        null;
+
+
+    updateHoldName();
+
+
+    sendQuaternion(
+
+        {
+            x: 0,
+            y: 0,
+            z: 0,
+            w: 1
+        },
+
+        true
+    );
+}
+
+
 function getControllerRotation(
     currentQuaternion
 ) {
 
     if (
-        referenceOrientation === null
+        referenceOrientation
+        === null
         ||
-        controllerBasis === null
+        controllerBasis
+        === null
     ) {
 
         return {
+
             x: 0,
             y: 0,
             z: 0,
@@ -1006,6 +1356,7 @@ function getControllerRotation(
     }
 
 
+    // 現実世界で、基準姿勢から現在姿勢までどう回転したか。
     const worldDelta =
         normalizeQuaternion(
 
@@ -1020,30 +1371,29 @@ function getControllerRotation(
         );
 
 
-    const controllerRotation =
-        normalizeQuaternion(
+    // 現実世界基準の回転をController Basisへ変換。
+    return normalizeQuaternion(
+
+        multiplyQuaternion(
 
             multiplyQuaternion(
 
-                multiplyQuaternion(
-
-                    inverseQuaternion(
-                        controllerBasis
-                    ),
-
-                    worldDelta
+                inverseQuaternion(
+                    controllerBasis
                 ),
 
-                controllerBasis
-            )
-        );
+                worldDelta
+            ),
 
-
-    return controllerRotation;
+            controllerBasis
+        )
+    );
 }
 
 
-function handleOrientation(event) {
+function handleOrientation(
+    event
+) {
 
     if (
         event.alpha === null
@@ -1071,9 +1421,11 @@ function handleOrientation(event) {
         alpha.toFixed(1)
         + "°";
 
+
     betaElement.textContent =
         beta.toFixed(1)
         + "°";
+
 
     gammaElement.textContent =
         gamma.toFixed(1)
@@ -1088,14 +1440,117 @@ function handleOrientation(event) {
         );
 
 
-    // 最初の姿勢を自動基準にする
+    // 最初の有効な姿勢を自動的に基準姿勢にする。
     if (
-        referenceOrientation === null
+        referenceOrientation
+        === null
     ) {
 
         setReferenceOrientation(
             currentOrientation
         );
+    }
+}
+
+
+// ==================================================
+// Latest-state sender
+// ==================================================
+
+function sendQuaternion(
+    q,
+    force
+) {
+
+    if (
+        socket === null
+        ||
+        socket.readyState
+        !== WebSocket.OPEN
+    ) {
+
+        return false;
+    }
+
+
+    //
+    // 通信が詰まっている場合、
+    // 通常の姿勢データは追加しない。
+    //
+    // 過去の姿勢を溜めて後から再生するより、
+    // 次回の最新姿勢を送った方が
+    // コントローラー用途では正しい。
+    //
+    if (
+        !force
+        &&
+        socket.bufferedAmount
+        >
+        MAX_SOCKET_BUFFERED_BYTES
+    ) {
+
+        return false;
+    }
+
+
+    const normalized =
+        normalizeQuaternion(q);
+
+
+    socket.send(
+
+        JSON.stringify({
+
+            type:
+                "orientation",
+
+            sessionId:
+                controllerSessionId,
+
+            calibrationId:
+                calibrationId,
+
+            sequence:
+                sequence++,
+
+            sentAtMs:
+                Date.now(),
+
+            x:
+                normalized.x,
+
+            y:
+                normalized.y,
+
+            z:
+                normalized.z,
+
+            w:
+                normalized.w
+        })
+    );
+
+
+    return true;
+}
+
+
+function sendCurrentOrientation(
+    force = false
+) {
+
+    if (
+        currentOrientation
+        === null
+        ||
+        referenceOrientation
+        === null
+        ||
+        controllerBasis
+        === null
+    ) {
+
+        return;
     }
 
 
@@ -1106,12 +1561,16 @@ function handleOrientation(event) {
 
 
     if (
-        previousSentQuaternion !== null
+        previousSentQuaternion
+        !== null
         &&
         dotQuaternion(
+
             previousSentQuaternion,
+
             controllerRotation
-        ) < 0
+        )
+        < 0
     ) {
 
         controllerRotation =
@@ -1121,68 +1580,61 @@ function handleOrientation(event) {
     }
 
 
-    previousSentQuaternion =
-        controllerRotation;
+    const sent =
+        sendQuaternion(
+
+            controllerRotation,
+
+            force
+        );
 
 
-    const now =
-        performance.now();
+    if (sent) {
+
+        previousSentQuaternion =
+            controllerRotation;
+    }
+}
 
 
-    // 最大約60Hz
+function startSendLoop() {
+
     if (
-        now - lastSendTime
-        < 16
+        sendTimer
+        !== null
     ) {
 
         return;
     }
 
 
-    lastSendTime =
-        now;
+    // センサーイベント頻度に依存せず、一定間隔で「現在の最新姿勢」だけ送る。
+    sendTimer =
+        setInterval(
 
+            () => {
 
-    if (
-        socket !== null
-        &&
-        socket.readyState
-        === WebSocket.OPEN
-    ) {
+                sendCurrentOrientation(
+                    false
+                );
 
-        socket.send(
+            },
 
-            JSON.stringify({
-
-                type:
-                    "orientation",
-
-                x:
-                    controllerRotation.x,
-
-                y:
-                    controllerRotation.y,
-
-                z:
-                    controllerRotation.z,
-
-                w:
-                    controllerRotation.w,
-
-                sequence:
-                    sequence++,
-
-                time:
-                    now
-            })
+            SEND_INTERVAL_MS
         );
-    }
 }
 
 
+// ==================================================
+// Sensor permission
+// ==================================================
+
 async function startSensors() {
 
-    if (sensorStarted) {
+    if (
+        sensorStarted
+    ) {
+
         return;
     }
 
@@ -1232,7 +1684,9 @@ async function startSensors() {
 
 
         window.addEventListener(
+
             "deviceorientation",
+
             handleOrientation
         );
 
@@ -1243,10 +1697,16 @@ async function startSensors() {
 
         sensorStatus.textContent =
             "センサー待機中...";
+
+
+        startSendLoop();
     }
     catch (error) {
 
-        console.error(error);
+        console.error(
+            error
+        );
+
 
         sensorStatus.textContent =
             "センサー開始失敗";
@@ -1257,7 +1717,8 @@ async function startSensors() {
 function calibrate() {
 
     if (
-        currentOrientation === null
+        currentOrientation
+        === null
     ) {
 
         return;
@@ -1271,13 +1732,17 @@ function calibrate() {
 
 
 startButton.addEventListener(
+
     "click",
+
     startSensors
 );
 
 
 calibrateButton.addEventListener(
+
     "click",
+
     calibrate
 );
 
