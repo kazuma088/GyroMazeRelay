@@ -11,6 +11,10 @@ const {
 const app = express();
 
 
+const RELAY_INTERVAL_MS =
+    20;
+
+
 // publicフォルダーをWebページとして公開
 app.use(
     express.static(
@@ -20,14 +24,16 @@ app.use(
 
 
 // 動作確認用
-app.get("/health", (req, res) => {
+app.get(
+    "/health",
+    (req, res) => {
 
-    res.json({
-        ok: true,
-        service: "Gyro Maze Relay"
-    });
-
-});
+        res.json({
+            ok: true,
+            service: "Gyro Maze Relay"
+        });
+    }
+);
 
 
 const server =
@@ -41,53 +47,161 @@ const wss =
     });
 
 
-// roomごとの接続を保存
-//
-// rooms = {
-//     demo: {
-//         phone: Set,
-//         unity: Set
-//     }
-// }
-const rooms = new Map();
+// ==================================================
+// Room
+// ==================================================
+
+const rooms =
+    new Map();
 
 
-function getRoom(roomName) {
+function getRoom(
+    roomName
+) {
 
-    if (!rooms.has(roomName)) {
+    if (
+        !rooms.has(roomName)
+    ) {
 
         rooms.set(
             roomName,
             {
-                phone: new Set(),
-                unity: new Set()
+                phone:
+                    new Set(),
+
+                unity:
+                    new Set(),
+
+                readyUnity:
+                    new Set(),
+
+                latestOrientation:
+                    null,
+
+                orientationVersion:
+                    0,
+
+                unityGeneration:
+                    0
             }
         );
     }
 
-    return rooms.get(roomName);
+
+    return rooms.get(
+        roomName
+    );
 }
 
 
-function cleanupRoom(roomName) {
+function cleanupRoom(
+    roomName
+) {
 
     const room =
-        rooms.get(roomName);
+        rooms.get(
+            roomName
+        );
+
 
     if (!room) {
+
         return;
     }
 
+
     if (
-        room.phone.size === 0 &&
+        room.phone.size === 0
+        &&
         room.unity.size === 0
     ) {
-        rooms.delete(roomName);
+
+        rooms.delete(
+            roomName
+        );
     }
 }
 
 
-// WebSocket接続
+function sendJson(
+    ws,
+    value
+) {
+
+    if (
+        ws.readyState
+        !== WebSocket.OPEN
+    ) {
+
+        return;
+    }
+
+
+    ws.send(
+        JSON.stringify(
+            value
+        )
+    );
+}
+
+
+function notifyPhones(
+    room
+) {
+
+    const unityReady =
+        room.readyUnity.size > 0;
+
+
+    for (
+        const phoneClient
+        of room.phone
+    ) {
+
+        sendJson(
+            phoneClient,
+            {
+                type:
+                    "relay_status",
+
+                unityReady:
+                    unityReady,
+
+                unityGeneration:
+                    room.unityGeneration
+            }
+        );
+    }
+}
+
+
+function clearLatestOrientation(
+    room
+) {
+
+    room.latestOrientation =
+        null;
+
+
+    room.orientationVersion =
+        0;
+
+
+    for (
+        const unityClient
+        of room.unity
+    ) {
+
+        unityClient.lastSentVersion =
+            -1;
+    }
+}
+
+
+// ==================================================
+// WebSocket connection
+// ==================================================
+
 wss.on(
     "connection",
     (ws, request) => {
@@ -104,15 +218,21 @@ wss.on(
                 url.searchParams.get("room")
                 || "demo"
             )
-            .slice(0, 64);
+            .slice(
+                0,
+                64
+            );
 
 
         const role =
-            url.searchParams.get("role");
+            url.searchParams.get(
+                "role"
+            );
 
 
         if (
-            role !== "phone" &&
+            role !== "phone"
+            &&
             role !== "unity"
         ) {
 
@@ -121,15 +241,40 @@ wss.on(
                 "Invalid role"
             );
 
+
             return;
         }
 
 
         const room =
-            getRoom(roomName);
+            getRoom(
+                roomName
+            );
 
 
-        room[role].add(ws);
+        ws.role =
+            role;
+
+
+        ws.roomName =
+            roomName;
+
+
+        ws.isRelayReady =
+            false;
+
+
+        ws.lastSentVersion =
+            -1;
+
+
+        ws.isAlive =
+            true;
+
+
+        room[role].add(
+            ws
+        );
 
 
         console.log(
@@ -137,59 +282,254 @@ wss.on(
         );
 
 
-        // heartbeat用
-        ws.isAlive = true;
+        if (
+            role === "phone"
+        ) {
 
+            sendJson(
+                ws,
+                {
+                    type:
+                        "relay_status",
+
+                    unityReady:
+                        room.readyUnity.size > 0,
+
+                    unityGeneration:
+                        room.unityGeneration
+                }
+            );
+        }
+
+
+        // ==============================================
+        // heartbeat
+        // ==============================================
 
         ws.on(
             "pong",
             () => {
 
-                ws.isAlive = true;
-
+                ws.isAlive =
+                    true;
             }
         );
 
+
+        // ==============================================
+        // message
+        // ==============================================
 
         ws.on(
             "message",
             (data, isBinary) => {
 
-                // 今回はスマホ → Unityだけ転送
-                if (role !== "phone") {
+                if (isBinary) {
+
                     return;
                 }
 
 
-                for (
-                    const unityClient
-                    of room.unity
+                const text =
+                    data.toString(
+                        "utf8"
+                    );
+
+
+                if (
+                    text.length > 8192
+                ) {
+
+                    return;
+                }
+
+
+                let message;
+
+
+                try {
+
+                    message =
+                        JSON.parse(
+                            text
+                        );
+                }
+                catch {
+
+                    return;
+                }
+
+
+                // ======================================
+                // Unity -> Server
+                // ======================================
+
+                if (
+                    role === "unity"
                 ) {
 
                     if (
-                        unityClient.readyState
-                        === WebSocket.OPEN
+                        message.type
+                        !== "unity_ready"
                     ) {
 
-                        unityClient.send(
-                            data,
-                            {
-                                binary: isBinary
-                            }
+                        return;
+                    }
+
+
+                    if (
+                        ws.isRelayReady
+                    ) {
+
+                        return;
+                    }
+
+
+                    const hadReadyUnity =
+                        room.readyUnity.size > 0;
+
+
+                    ws.isRelayReady =
+                        true;
+
+
+                    ws.lastSentVersion =
+                        -1;
+
+
+                    room.readyUnity.add(
+                        ws
+                    );
+
+
+                    room.unityGeneration +=
+                        1;
+
+
+                    if (
+                        !hadReadyUnity
+                    ) {
+
+                        clearLatestOrientation(
+                            room
                         );
                     }
+
+
+                    console.log(
+                        `[ready] room=${roomName} role=unity`
+                    );
+
+
+                    notifyPhones(
+                        room
+                    );
+
+
+                    return;
                 }
+
+
+                // ======================================
+                // Phone -> Server
+                // ======================================
+
+                if (
+                    message.type
+                    !== "orientation"
+                ) {
+
+                    return;
+                }
+
+
+                if (
+                    room.readyUnity.size === 0
+                ) {
+
+                    return;
+                }
+
+
+                if (
+                    typeof message.sessionId
+                        !== "string"
+                    ||
+                    typeof message.calibrationId
+                        !== "number"
+                    ||
+                    typeof message.sequence
+                        !== "number"
+                    ||
+                    typeof message.x
+                        !== "number"
+                    ||
+                    typeof message.y
+                        !== "number"
+                    ||
+                    typeof message.z
+                        !== "number"
+                    ||
+                    typeof message.w
+                        !== "number"
+                ) {
+
+                    return;
+                }
+
+
+                room.latestOrientation =
+                    message;
+
+
+                room.orientationVersion +=
+                    1;
             }
         );
 
+
+        // ==============================================
+        // close
+        // ==============================================
 
         ws.on(
             "close",
             () => {
 
-                room[role].delete(ws);
+                room[role].delete(
+                    ws
+                );
 
-                cleanupRoom(roomName);
+
+                if (
+                    role === "unity"
+                ) {
+
+                    room.readyUnity.delete(
+                        ws
+                    );
+
+
+                    if (
+                        room.readyUnity.size === 0
+                    ) {
+
+                        clearLatestOrientation(
+                            room
+                        );
+                    }
+
+
+                    notifyPhones(
+                        room
+                    );
+                }
+
+
+                cleanupRoom(
+                    roomName
+                );
+
 
                 console.log(
                     `[disconnect] room=${roomName} role=${role}`
@@ -202,15 +542,102 @@ wss.on(
             "error",
             (error) => {
 
-                console.error(error);
-
+                console.error(
+                    error
+                );
             }
         );
     }
 );
 
 
-// 死んでいる接続を掃除
+// ==================================================
+// Latest-state relay
+// ==================================================
+
+const relayInterval =
+    setInterval(
+        () => {
+
+            const relaySentAtMs =
+                Date.now();
+
+
+            for (
+                const room
+                of rooms.values()
+            ) {
+
+                if (
+                    room.readyUnity.size === 0
+                    ||
+                    room.latestOrientation === null
+                ) {
+
+                    continue;
+                }
+
+
+                const version =
+                    room.orientationVersion;
+
+
+                const payload =
+                    JSON.stringify({
+
+                        ...room.latestOrientation,
+
+                        relaySentAtMs:
+                            relaySentAtMs
+                    });
+
+
+                for (
+                    const unityClient
+                    of room.readyUnity
+                ) {
+
+                    if (
+                        unityClient.readyState
+                            !== WebSocket.OPEN
+                        ||
+                        unityClient.lastSentVersion
+                            === version
+                    ) {
+
+                        continue;
+                    }
+
+
+                    if (
+                        unityClient.bufferedAmount
+                        !== 0
+                    ) {
+
+                        continue;
+                    }
+
+
+                    unityClient.send(
+                        payload
+                    );
+
+
+                    unityClient.lastSentVersion =
+                        version;
+                }
+            }
+
+        },
+
+        RELAY_INTERVAL_MS
+    );
+
+
+// ==================================================
+// heartbeat
+// ==================================================
+
 const heartbeatInterval =
     setInterval(
         () => {
@@ -220,7 +647,9 @@ const heartbeatInterval =
                 of wss.clients
             ) {
 
-                if (ws.isAlive === false) {
+                if (
+                    ws.isAlive === false
+                ) {
 
                     ws.terminate();
 
@@ -228,12 +657,15 @@ const heartbeatInterval =
                 }
 
 
-                ws.isAlive = false;
+                ws.isAlive =
+                    false;
+
 
                 ws.ping();
             }
 
         },
+
         30000
     );
 
@@ -243,12 +675,20 @@ wss.on(
     () => {
 
         clearInterval(
-            heartbeatInterval
+            relayInterval
         );
 
+
+        clearInterval(
+            heartbeatInterval
+        );
     }
 );
 
+
+// ==================================================
+// Start
+// ==================================================
 
 const port =
     process.env.PORT || 10000;
@@ -262,6 +702,5 @@ server.listen(
         console.log(
             `Gyro Maze Relay started on port ${port}`
         );
-
     }
 );
